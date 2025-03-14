@@ -5,6 +5,7 @@ A real-time chat application built with Spring Boot and WebSocket that supports 
 ## Screenshot
 
 ![Screenshot 2025-03-14 080705](https://github.com/user-attachments/assets/5bf7b464-1c15-4075-8cf5-bff446a1db25)
+![Screenshot 2025-03-14 080717](https://github.com/user-attachments/assets/1cf7b542-3b9d-4890-aeed-31161429432a)
 
 
 *Screenshot: Chat interface showing real-time messaging and media sharing capabilities*
