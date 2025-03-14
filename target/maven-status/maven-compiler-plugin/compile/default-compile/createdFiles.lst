@@ -1,0 +1,9 @@
+com\example\Client.class
+com\example\controller\ChatController.class
+com\example\model\ChatMessage$MessageType.class
+com\example\config\WebSocketConfig.class
+com\example\Client$MessageListener.class
+com\example\model\ChatMessage.class
+com\example\server$ClientHandler.class
+com\example\WebChatApplication.class
+com\example\server.class

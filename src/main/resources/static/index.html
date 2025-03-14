@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Spring WebSocket Chat</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f2f5;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .chat-container {
+            width: 90%;
+            max-width: 800px;
+            height: 80vh;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-header {
+            background: #075e54;
+            color: white;
+            padding: 15px;
+            text-align: center;
+            border-radius: 8px 8px 0 0;
+        }
+
+        #login-page {
+            padding: 20px;
+            text-align: center;
+        }
+
+        #chat-page {
+            display: none;
+            flex: 1;
+            flex-direction: column;
+        }
+
+        .message-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .message {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+            max-width: 70%;
+        }
+
+        .message.received {
+            background-color: #f0f0f0;
+            align-self: flex-start;
+        }
+
+        .message.sent {
+            background-color: #dcf8c6;
+            align-self: flex-end;
+            margin-left: auto;
+        }
+
+        .input-container {
+            padding: 20px;
+            border-top: 1px solid #ddd;
+            display: flex;
+            gap: 10px;
+        }
+
+        input[type="text"] {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            flex: 1;
+        }
+
+        button {
+            padding: 10px 20px;
+            background-color: #075e54;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #128c7e;
+        }
+
+        .media-preview {
+            max-width: 200px;
+            max-height: 200px;
+            margin: 10px 0;
+        }
+
+        .media-message img {
+            max-width: 300px;
+            max-height: 300px;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        .media-message video {
+            max-width: 300px;
+            max-height: 300px;
+            border-radius: 8px;
+        }
+
+        .media-buttons {
+            display: flex;
+            gap: 10px;
+            margin-right: 10px;
+        }
+
+        .media-button {
+            background: none;
+            border: none;
+            color: #075e54;
+            cursor: pointer;
+            font-size: 20px;
+            padding: 5px;
+        }
+
+        .media-button:hover {
+            color: #128c7e;
+        }
+
+        #mediaPreview {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        #mediaPreview img, #mediaPreview video {
+            max-width: 90%;
+            max-height: 90%;
+        }
+
+        .close-preview {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: white;
+            font-size: 30px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <h2>Real-Time Chat</h2>
+        </div>
+
+        <div id="login-page">
+            <h3>Enter your name</h3>
+            <br/>
+            <input type="text" id="name" placeholder="Name"/>
+            <button onclick="connect()">Join Chat</button>
+        </div>
+
+        <div id="chat-page">
+            <div id="message-list" class="message-list"></div>
+            <div class="input-container">
+                <div class="media-buttons">
+                    <input type="file" id="imageInput" accept="image/*" style="display: none" onchange="handleMediaUpload(this, 'IMAGE')"/>
+                    <button class="media-button" onclick="document.getElementById('imageInput').click()">
+                        <i class="fas fa-image"></i>
+                    </button>
+                    
+                    <input type="file" id="videoInput" accept="video/*" style="display: none" onchange="handleMediaUpload(this, 'VIDEO')"/>
+                    <button class="media-button" onclick="document.getElementById('videoInput').click()">
+                        <i class="fas fa-video"></i>
+                    </button>
+                </div>
+                <input type="text" id="message" placeholder="Type a message..."/>
+                <button onclick="send()">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="mediaPreview">
+        <span class="close-preview" onclick="closeMediaPreview()">&times;</span>
+        <div id="mediaPreviewContent"></div>
+    </div>
+
+    <script src="/webjars/sockjs-client/sockjs.min.js"></script>
+    <script src="/webjars/stomp-websocket/stomp.min.js"></script>
+
+    <script>
+        let stompClient = null;
+        let username = null;
+
+        function connect() {
+            username = document.getElementById('name').value.trim();
+            if (username) {
+                let socket = new SockJS('/ws');
+                stompClient = Stomp.over(socket);
+                stompClient.connect({}, onConnected, onError);
+            } else {
+                alert('Please enter your name.');
+            }
+        }
+
+        function onConnected() {
+            stompClient.subscribe('/topic/public', onMessageReceived);
+            stompClient.send("/app/chat.addUser",
+                {},
+                JSON.stringify({sender: username, type: 'JOIN'})
+            );
+            document.getElementById('login-page').style.display = 'none';
+            document.getElementById('chat-page').style.display = 'flex';
+        }
+
+        function onError() {
+            alert('Could not connect to WebSocket server. Please refresh this page to try again!');
+        }
+
+        function send() {
+            let messageContent = document.getElementById('message').value.trim();
+            if (messageContent && stompClient) {
+                let chatMessage = {
+                    sender: username,
+                    content: messageContent,
+                    type: 'CHAT'
+                };
+                stompClient.send("/app/chat.sendMessage", {}, JSON.stringify(chatMessage));
+                document.getElementById('message').value = '';
+            }
+        }
+
+        function handleMediaUpload(input, mediaType) {
+            const file = input.files[0];
+            if (!file) return;
+
+            // Check file size (max 8MB to be safe)
+            const maxSize = 8 * 1024 * 1024; // 8MB in bytes
+            if (file.size > maxSize) {
+                alert('File is too large. Maximum size is 8MB.');
+                input.value = ''; // Clear the input
+                return;
+            }
+
+            // Validate file type
+            if (mediaType === 'VIDEO' && !file.type.startsWith('video/')) {
+                alert('Please select a valid video file.');
+                input.value = '';
+                return;
+            }
+
+            if (mediaType === 'IMAGE' && !file.type.startsWith('image/')) {
+                alert('Please select a valid image file.');
+                input.value = '';
+                return;
+            }
+
+            // Show loading message
+            const messageList = document.getElementById('message-list');
+            const loadingDiv = document.createElement('div');
+            loadingDiv.classList.add('message', 'sent');
+            loadingDiv.textContent = 'Uploading ' + mediaType.toLowerCase() + '... 0%';
+            messageList.appendChild(loadingDiv);
+            messageList.scrollTop = messageList.scrollHeight;
+
+            const reader = new FileReader();
+            
+            // Add progress handling
+            reader.onprogress = function(e) {
+                if (e.lengthComputable) {
+                    const percentLoaded = Math.round((e.loaded / e.total) * 100);
+                    loadingDiv.textContent = `Uploading ${mediaType.toLowerCase()}... ${percentLoaded}%`;
+                }
+            };
+            
+            reader.onload = function(e) {
+                try {
+                    const mediaData = e.target.result;
+                    
+                    // For videos, check if we can create a video element
+                    if (mediaType === 'VIDEO') {
+                        const video = document.createElement('video');
+                        video.src = mediaData;
+                        video.onerror = function() {
+                            alert('This video format is not supported. Please try another format (MP4 recommended).');
+                            messageList.removeChild(loadingDiv);
+                            return;
+                        };
+                    }
+                    
+                    sendMedia(mediaData, file.type, mediaType);
+                    messageList.removeChild(loadingDiv);
+                } catch (error) {
+                    console.error('Error processing file:', error);
+                    alert('Error processing file. Please try again with a smaller file or different format.');
+                    messageList.removeChild(loadingDiv);
+                }
+            };
+
+            reader.onerror = function(error) {
+                console.error('Error reading file:', error);
+                alert('Error reading file. Please try again.');
+                messageList.removeChild(loadingDiv);
+            };
+
+            try {
+                reader.readAsDataURL(file);
+            } catch (error) {
+                console.error('Error starting file read:', error);
+                alert('Error reading file. Please try again.');
+                messageList.removeChild(loadingDiv);
+            }
+        }
+
+        function sendMedia(mediaData, mimeType, mediaType) {
+            if (!stompClient || !stompClient.connected) {
+                alert('Not connected to chat. Please refresh the page and try again.');
+                return;
+            }
+
+            try {
+                const chatMessage = {
+                    sender: username,
+                    content: mediaData,
+                    type: mediaType,
+                    mediaType: mimeType,
+                    timestamp: new Date().getTime()
+                };
+
+                const jsonMessage = JSON.stringify(chatMessage);
+                
+                // Check message size
+                if (jsonMessage.length > 9 * 1024 * 1024) { // 9MB limit
+                    throw new Error('Message too large');
+                }
+
+                stompClient.send("/app/chat.sendMessage", {}, jsonMessage);
+            } catch (error) {
+                console.error('Error sending media:', error);
+                if (error.message === 'Message too large') {
+                    alert('File is too large to send. Please try a smaller file (max 8MB).');
+                } else {
+                    alert('Error sending media. Please try again with a smaller file or different format.');
+                }
+            }
+        }
+
+        function onMessageReceived(payload) {
+            try {
+                let message = JSON.parse(payload.body);
+                let messageElement = document.createElement('div');
+                messageElement.classList.add('message');
+
+                if (message.sender === username) {
+                    messageElement.classList.add('sent');
+                } else {
+                    messageElement.classList.add('received');
+                }
+
+                let contentElement = document.createElement('div');
+                
+                switch(message.type) {
+                    case 'JOIN':
+                        message.content = message.sender + ' joined the chat';
+                        contentElement.textContent = message.content;
+                        break;
+                    case 'LEAVE':
+                        message.content = message.sender + ' left the chat';
+                        contentElement.textContent = message.content;
+                        break;
+                    case 'IMAGE':
+                        contentElement.classList.add('media-message');
+                        const img = document.createElement('img');
+                        img.src = message.content;
+                        img.onload = function() {
+                            messageElement.classList.remove('loading');
+                        };
+                        img.onerror = function() {
+                            contentElement.textContent = 'Error loading image';
+                        };
+                        img.onclick = () => showMediaPreview(message.content, 'image');
+                        contentElement.appendChild(img);
+                        break;
+                    case 'VIDEO':
+                        contentElement.classList.add('media-message');
+                        const video = document.createElement('video');
+                        video.src = message.content;
+                        video.controls = true;
+                        video.onloadeddata = function() {
+                            messageElement.classList.remove('loading');
+                        };
+                        video.onerror = function() {
+                            contentElement.textContent = 'Error loading video';
+                        };
+                        contentElement.appendChild(video);
+                        break;
+                    default:
+                        contentElement.textContent = message.content;
+                }
+
+                const senderElement = document.createElement('div');
+                senderElement.classList.add('sender');
+                senderElement.textContent = message.sender;
+
+                messageElement.appendChild(senderElement);
+                messageElement.appendChild(contentElement);
+
+                document.getElementById('message-list').appendChild(messageElement);
+                document.getElementById('message-list').scrollTop = document.getElementById('message-list').scrollHeight;
+            } catch (error) {
+                console.error('Error processing message:', error);
+            }
+        }
+
+        function showMediaPreview(src, type) {
+            const preview = document.getElementById('mediaPreview');
+            const content = document.getElementById('mediaPreviewContent');
+            content.innerHTML = '';
+
+            if (type === 'image') {
+                const img = document.createElement('img');
+                img.src = src;
+                content.appendChild(img);
+            } else if (type === 'video') {
+                const video = document.createElement('video');
+                video.src = src;
+                video.controls = true;
+                content.appendChild(video);
+            }
+
+            preview.style.display = 'flex';
+        }
+
+        function closeMediaPreview() {
+            document.getElementById('mediaPreview').style.display = 'none';
+        }
+
+        // Handle Enter key
+        document.getElementById('message').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                send();
+            }
+        });
+
+        document.getElementById('name').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                connect();
+            }
+        });
+    </script>
+</body>
+</html> 
